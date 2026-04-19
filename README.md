@@ -63,6 +63,9 @@ Additionally, the following commands are available:
 | L   | Stop replaying a shapshot  |
 | R   | Toggle between fast and slow renderer |
 | F   | Display renderer performance |
+| G   | Cycle graphics effect |
+| F11 | Quick save |
+| F12 | Quick load |
 | F1-F10 | Load snapshot      |
 | Alt+Enter | Toggle Fullscreen     |
 | Shift+F1-F10 | Save snapshot |

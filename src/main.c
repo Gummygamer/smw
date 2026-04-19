@@ -45,6 +45,8 @@ static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len);
 static void LoadAssets();
 static void SwitchDirectory();
 static void RenderNumber(uint8 *dst, size_t pitch, int n, uint8 big);
+static void ApplyPostProcessEffect(uint8 *dst, size_t pitch, int width, int height, uint8 mode, uint32 frame);
+static const char *GetPostProcessName(uint8 mode);
 static void OpenOneGamepad(int i);
 static uint32 GetActiveControllers(void);
 static void HandleVolumeAdjustment(int volume_adjustment);
@@ -72,6 +74,7 @@ enum {
   kDefaultFreq = 44100,
   kDefaultChannels = 2,
   kDefaultSamples = 2048,
+  kQuickSaveSlot = 20,
 };
 
 static const char kWindowTitle[] = "SMW";
@@ -82,6 +85,8 @@ static uint8 g_paused, g_turbo, g_replay_turbo = true, g_cursor = true;
 static uint8 g_current_window_scale;
 static uint32 g_input_state;
 static bool g_display_perf;
+static uint8 g_post_process_mode;
+static uint32 g_post_process_frame;
 static int g_curr_fps;
 static int g_ppu_render_flags = 0;
 static int g_snes_width, g_snes_height;
@@ -206,6 +211,9 @@ static void DrawPpuFrameWithPerf(void) {
   } else {
     RtlDrawPpuFrame(pixel_buffer, pitch, g_ppu_render_flags);
   }
+  ApplyPostProcessEffect(pixel_buffer, pitch, g_snes_width * render_scale, g_snes_height * render_scale,
+                         g_post_process_mode, g_post_process_frame++);
+
   if (g_display_perf)
     RenderNumber(pixel_buffer + pitch * render_scale, pitch, g_curr_fps, render_scale == 4);
 
@@ -351,6 +359,7 @@ int main(int argc, char** argv) {
     argc -= 1, argv += 1;
   }
   ParseConfigFile(config_file);
+  g_post_process_mode = g_config.post_process;
 
   LoadAssets();
 
@@ -663,6 +672,189 @@ static void RenderNumber(uint8 *dst, size_t pitch, int n, uint8 big) {
     RenderDigit(dst + (i << big), pitch, *s - '0', 0xffffff, big);
 }
 
+static uint8 ScaleByte(uint8 value, int scale) {
+  int result = (value * scale) >> 8;
+  return (uint8)IntMin(result, 255);
+}
+
+static uint32 ScalePixel(uint32 pixel, int scale) {
+  return (pixel & 0xff000000) |
+    ScaleByte(pixel & 0xff, scale) |
+    (ScaleByte((pixel >> 8) & 0xff, scale) << 8) |
+    (ScaleByte((pixel >> 16) & 0xff, scale) << 16);
+}
+
+static uint32 ScalePixelChannels(uint32 pixel, int scale0, int scale1, int scale2) {
+  return (pixel & 0xff000000) |
+    ScaleByte(pixel & 0xff, scale0) |
+    (ScaleByte((pixel >> 8) & 0xff, scale1) << 8) |
+    (ScaleByte((pixel >> 16) & 0xff, scale2) << 16);
+}
+
+static uint8 WeightedByte(uint8 center, uint8 left, uint8 right, uint8 up, uint8 down) {
+  return (uint8)((center * 8 + left * 2 + right * 2 + up * 2 + down * 2) >> 4);
+}
+
+static uint32 SmoothPixel(const uint32 *src, int x, int y, int width, int height) {
+  int left = x != 0 ? x - 1 : x;
+  int right = x + 1 != width ? x + 1 : x;
+  int up = y != 0 ? y - 1 : y;
+  int down = y + 1 != height ? y + 1 : y;
+  uint32 center = src[y * width + x];
+  uint32 px_left = src[y * width + left];
+  uint32 px_right = src[y * width + right];
+  uint32 px_up = src[up * width + x];
+  uint32 px_down = src[down * width + x];
+
+  return (center & 0xff000000) |
+    WeightedByte(center & 0xff, px_left & 0xff, px_right & 0xff, px_up & 0xff, px_down & 0xff) |
+    (WeightedByte((center >> 8) & 0xff, (px_left >> 8) & 0xff, (px_right >> 8) & 0xff, (px_up >> 8) & 0xff, (px_down >> 8) & 0xff) << 8) |
+    (WeightedByte((center >> 16) & 0xff, (px_left >> 16) & 0xff, (px_right >> 16) & 0xff, (px_up >> 16) & 0xff, (px_down >> 16) & 0xff) << 16);
+}
+
+static uint8 GentleWeightedByte(uint8 center, uint8 left, uint8 right, uint8 up, uint8 down) {
+  uint8 lo = center, hi = center;
+  if (left < lo) lo = left;
+  if (right < lo) lo = right;
+  if (up < lo) lo = up;
+  if (down < lo) lo = down;
+  if (left > hi) hi = left;
+  if (right > hi) hi = right;
+  if (up > hi) hi = up;
+  if (down > hi) hi = down;
+  if (hi - lo < 64)
+    return center;
+  return (uint8)((center * 12 + left + right + up + down) >> 4);
+}
+
+static uint32 GentleSmoothPixel(const uint32 *src, int x, int y, int width, int height) {
+  int left = x != 0 ? x - 1 : x;
+  int right = x + 1 != width ? x + 1 : x;
+  int up = y != 0 ? y - 1 : y;
+  int down = y + 1 != height ? y + 1 : y;
+  uint32 center = src[y * width + x];
+  uint32 px_left = src[y * width + left];
+  uint32 px_right = src[y * width + right];
+  uint32 px_up = src[up * width + x];
+  uint32 px_down = src[down * width + x];
+
+  return (center & 0xff000000) |
+    GentleWeightedByte(center & 0xff, px_left & 0xff, px_right & 0xff, px_up & 0xff, px_down & 0xff) |
+    (GentleWeightedByte((center >> 8) & 0xff, (px_left >> 8) & 0xff, (px_right >> 8) & 0xff, (px_up >> 8) & 0xff, (px_down >> 8) & 0xff) << 8) |
+    (GentleWeightedByte((center >> 16) & 0xff, (px_left >> 16) & 0xff, (px_right >> 16) & 0xff, (px_up >> 16) & 0xff, (px_down >> 16) & 0xff) << 16);
+}
+
+static uint8 ApplyContrastByte(uint8 value) {
+  int result = (value - 128) * 268 / 256 + 130;
+  return (uint8)IntMin(IntMax(result, 0), 255);
+}
+
+static uint32 ApplyModernGrade(uint32 pixel, int shade) {
+  uint8 c0 = ApplyContrastByte(pixel & 0xff);
+  uint8 c1 = ApplyContrastByte((pixel >> 8) & 0xff);
+  uint8 c2 = ApplyContrastByte((pixel >> 16) & 0xff);
+  int gray = (c0 + c1 * 2 + c2) >> 2;
+
+  int out0 = gray + (c0 - gray) * 272 / 256;
+  int out1 = gray + (c1 - gray) * 272 / 256;
+  int out2 = gray + (c2 - gray) * 272 / 256;
+
+  return (pixel & 0xff000000) |
+    ScaleByte((uint8)IntMin(IntMax(out0, 0), 255), shade) |
+    (ScaleByte((uint8)IntMin(IntMax(out1, 0), 255), shade) << 8) |
+    (ScaleByte((uint8)IntMin(IntMax(out2, 0), 255), shade) << 16);
+}
+
+static uint32 GrayscalePixel(uint32 pixel) {
+  uint8 c0 = pixel & 0xff;
+  uint8 c1 = (pixel >> 8) & 0xff;
+  uint8 c2 = (pixel >> 16) & 0xff;
+  uint8 gray = (c0 + c1 * 2 + c2) >> 2;
+  return (pixel & 0xff000000) | gray | gray << 8 | gray << 16;
+}
+
+static void ApplyPostProcessEffect(uint8 *dst, size_t pitch, int width, int height, uint8 mode, uint32 frame) {
+  if (mode == kPostProcess_None || width <= 0 || height <= 0)
+    return;
+
+  static uint32 *copy_buffer;
+  static size_t copy_buffer_size;
+  if (mode == kPostProcess_Modern || mode == kPostProcess_Smooth || mode == kPostProcess_SoftShade) {
+    size_t needed = (size_t)width * height;
+    if (needed > copy_buffer_size) {
+      uint32 *new_buffer = (uint32 *)realloc(copy_buffer, needed * sizeof(uint32));
+      if (!new_buffer)
+        Die("Unable to allocate post-process buffer");
+      copy_buffer = new_buffer;
+      copy_buffer_size = needed;
+    }
+    for (int y = 0; y < height; y++)
+      memcpy(copy_buffer + y * width, dst + y * pitch, width * sizeof(uint32));
+  }
+
+  int width_squared = width * width;
+  int height_squared = height * height;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(dst + y * pitch);
+    if (mode == kPostProcess_Modern || mode == kPostProcess_Smooth || mode == kPostProcess_SoftShade) {
+      int dy = y * 2 - height;
+      if (dy < 0)
+        dy = -dy;
+      int row_shade = mode == kPostProcess_SoftShade ? 268 - dy * dy * 18 / height_squared : 256;
+      for (int x = 0; x < width; x++) {
+        uint32 pixel = mode == kPostProcess_SoftShade ?
+          SmoothPixel(copy_buffer, x, y, width, height) :
+          GentleSmoothPixel(copy_buffer, x, y, width, height);
+        if (mode == kPostProcess_Modern || mode == kPostProcess_SoftShade) {
+          int dx = x * 2 - width;
+          if (dx < 0)
+            dx = -dx;
+          int shade = mode == kPostProcess_SoftShade ?
+            IntMax(row_shade - dx * dx * 14 / width_squared, 232) :
+            256;
+          pixel = ApplyModernGrade(pixel, shade);
+        }
+        row[x] = pixel;
+      }
+    } else if (mode == kPostProcess_Scanlines) {
+      if (y & 1) {
+        for (int x = 0; x < width; x++)
+          row[x] = ScalePixel(row[x], 172);
+      }
+    } else if (mode == kPostProcess_Crt) {
+      int dy = y * 2 - height;
+      if (dy < 0)
+        dy = -dy;
+      int row_vignette = 256 - dy * dy * 52 / height_squared;
+      int scanline = (y & 1) ? 174 : 248;
+      if (((y + frame) & 31) == 0)
+        scanline = IntMin(scanline + 10, 256);
+      for (int x = 0; x < width; x++) {
+        int dx = x * 2 - width;
+        if (dx < 0)
+          dx = -dx;
+        int vignette = row_vignette - dx * dx * 44 / width_squared;
+        int scale = IntMax(vignette, 128) * scanline >> 8;
+        int scale0 = scale, scale1 = scale, scale2 = scale;
+        switch ((x + y) % 3) {
+        case 0: scale0 = IntMin(scale0 + 22, 288); break;
+        case 1: scale1 = IntMin(scale1 + 18, 288); break;
+        default: scale2 = IntMin(scale2 + 22, 288); break;
+        }
+        row[x] = ScalePixelChannels(row[x], scale0, scale1, scale2);
+      }
+    } else if (mode == kPostProcess_Grayscale) {
+      for (int x = 0; x < width; x++)
+        row[x] = GrayscalePixel(row[x]);
+    }
+  }
+}
+
+static const char *GetPostProcessName(uint8 mode) {
+  static const char *const kNames[] = { "None", "Modern", "Smooth", "SoftShade", "Scanlines", "CRT", "Grayscale" };
+  return mode < countof(kNames) ? kNames[mode] : "Unknown";
+}
+
 static void HandleCommand(uint32 j, bool pressed) {
   static const uint8 kKbdRemap[] = { 4, 5, 6, 7, 2, 3, 8, 0, 9, 1, 10, 11 };
   if (j < kKeys_Controls)
@@ -701,6 +893,12 @@ static void HandleCommand(uint32 j, bool pressed) {
     switch (j) {
     case kKeys_CheatLife: RtlCheat('w'); break;
     case kKeys_CheatJump: RtlCheat('q'); break;
+    case kKeys_QuickSave: RtlSaveLoad(kSaveLoad_Save, kQuickSaveSlot); break;
+    case kKeys_QuickLoad: RtlSaveLoad(kSaveLoad_Load, kQuickSaveSlot); break;
+    case kKeys_TogglePostProcess:
+      g_post_process_mode = (g_post_process_mode + 1) % kPostProcess_Count;
+      printf("Post process: %s\n", GetPostProcessName(g_post_process_mode));
+      break;
     case kKeys_ToggleWhichFrame:
       g_other_image = !g_other_image;
       printf("Image=%d\n", g_other_image);

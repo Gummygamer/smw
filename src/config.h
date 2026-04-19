@@ -31,6 +31,9 @@ enum {
   kKeys_PauseDimmed,
   kKeys_Turbo,
   kKeys_ReplayTurbo,
+  kKeys_QuickSave,
+  kKeys_QuickLoad,
+  kKeys_TogglePostProcess,
   kKeys_WindowBigger,
   kKeys_WindowSmaller,
   kKeys_DisplayPerf,
@@ -44,6 +47,17 @@ enum {
   kOutputMethod_SDL,
   kOutputMethod_SDLSoftware,
   kOutputMethod_OpenGL,
+};
+
+enum {
+  kPostProcess_None,
+  kPostProcess_Modern,
+  kPostProcess_Smooth,
+  kPostProcess_SoftShade,
+  kPostProcess_Scanlines,
+  kPostProcess_Crt,
+  kPostProcess_Grayscale,
+  kPostProcess_Count,
 };
 
 typedef struct Config {
@@ -65,6 +79,7 @@ typedef struct Config {
   bool extend_y;
   bool no_sprite_limits;
   bool display_perf_title;
+  uint8 post_process;
   uint8 enable_msu;
   bool resume_msu;
   bool disable_frame_delay;

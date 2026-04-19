@@ -38,8 +38,8 @@ static const uint16 kDefaultKbdControls[kKeys_Total] = {
   C(SDLK_1), C(SDLK_2), C(SDLK_3), C(SDLK_4), C(SDLK_5), C(SDLK_6), C(SDLK_7), C(SDLK_8), C(SDLK_9), C(SDLK_0), C(SDLK_MINUS), C(SDLK_EQUALS), C(SDLK_BACKSPACE), N, N, N, N, N, N, N,
   // CheatLife, CheatJump, ToggleWhichFrame,
   _(SDLK_w), _(SDLK_q), S(SDLK_r),
-  // ClearKeyLog, StopReplay, Fullscreen, Reset, Pause, PauseDimmed, Turbo, ReplayTurbo, WindowBigger, WindowSmaller, DisplayPerf, ToggleRenderer
-  _(SDLK_k), _(SDLK_l), A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), _(SDLK_t), N, N, _(SDLK_f), _(SDLK_r),
+  // ClearKeyLog, StopReplay, Fullscreen, Reset, Pause, PauseDimmed, Turbo, ReplayTurbo, QuickSave, QuickLoad, TogglePostProcess, WindowBigger, WindowSmaller, DisplayPerf, ToggleRenderer
+  _(SDLK_k), _(SDLK_l), A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), _(SDLK_t), _(SDLK_F11), _(SDLK_F12), _(SDLK_g), N, N, _(SDLK_f), _(SDLK_r),
   // VolumeUp VolumeDown
   0, 0,
 };
@@ -62,7 +62,8 @@ static const KeyNameId kKeyNameId[] = {
   M(Load), M(Save), M(Replay), M(LoadRef), M(ReplayRef),
   S(CheatLife), S(CheatJump), S(ToggleWhichFrame),
   S(ClearKeyLog), S(StopReplay), S(Fullscreen), S(Reset),
-  S(Pause), S(PauseDimmed), S(Turbo), S(ReplayTurbo), S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
+  S(Pause), S(PauseDimmed), S(Turbo), S(ReplayTurbo), S(QuickSave), S(QuickLoad), S(TogglePostProcess),
+  S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
 };
 #undef S
 #undef M
@@ -327,6 +328,28 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
   return true;
 }
 
+static bool ParsePostProcess(const char *value, uint8 *result) {
+  if (StringEqualsNoCase(value, "None") || StringEqualsNoCase(value, "Off") || StringEqualsNoCase(value, "0")) {
+    *result = kPostProcess_None;
+  } else if (StringEqualsNoCase(value, "Modern") || StringEqualsNoCase(value, "Shaded") || StringEqualsNoCase(value, "1")) {
+    *result = kPostProcess_Modern;
+  } else if (StringEqualsNoCase(value, "Smooth") || StringEqualsNoCase(value, "AA") ||
+             StringEqualsNoCase(value, "AntiAlias") || StringEqualsNoCase(value, "Anti-Alias") || StringEqualsNoCase(value, "2")) {
+    *result = kPostProcess_Smooth;
+  } else if (StringEqualsNoCase(value, "SoftShade") || StringEqualsNoCase(value, "Soft-Shade") || StringEqualsNoCase(value, "3")) {
+    *result = kPostProcess_SoftShade;
+  } else if (StringEqualsNoCase(value, "Scanlines") || StringEqualsNoCase(value, "4")) {
+    *result = kPostProcess_Scanlines;
+  } else if (StringEqualsNoCase(value, "CRT") || StringEqualsNoCase(value, "Crt") || StringEqualsNoCase(value, "5")) {
+    *result = kPostProcess_Crt;
+  } else if (StringEqualsNoCase(value, "Grayscale") || StringEqualsNoCase(value, "Greyscale") || StringEqualsNoCase(value, "6")) {
+    *result = kPostProcess_Grayscale;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 static bool HandleIniConfig(int section, const char *key, char *value) {
   if (section == 0) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
@@ -393,6 +416,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "Shader")) {
       g_config.shader = *value ? value : NULL;
       return true;
+    } else if (StringEqualsNoCase(key, "PostProcess")) {
+      return ParsePostProcess(value, &g_config.post_process);
     }
   } else if (section == 2) {
     if (StringEqualsNoCase(key, "EnableAudio")) {
@@ -480,6 +505,7 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 void ParseConfigFile(const char *filename) {
   g_config.msuvolume = 100;  // default msu volume, 100%
   g_config.save_playthrough = true;
+  g_config.post_process = kPostProcess_Modern;
 
   if (filename != NULL || !ParseOneConfigFile("smw.user.ini", 0)) {
     if (filename == NULL)

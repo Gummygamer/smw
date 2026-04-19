@@ -4,6 +4,8 @@
 #include "variables.h"
 #include "assets/smw_assets.h"
 
+static bool g_double_jump_used;
+
 static FuncV *const kInitAndMainLoop_GameModePtrs[42] = {
     &GameMode00_LoadNintendoPresents,
     &GameMode01_ShowNintendoPresents,
@@ -4450,6 +4452,7 @@ void HandlePlayerPhysics() {  // 00d5f2
   uint8 v4;
   uint8 r1 = 0;
   if (!player_in_air_flag) {
+    g_double_jump_used = false;
     player_ducking_flag = 0;
     if (!player_sliding_on_ground && (io_controller_hold1 & 4) != 0) {
       player_ducking_flag = io_controller_hold1 & 4;
@@ -4489,6 +4492,16 @@ void HandlePlayerPhysics() {  // 00d5f2
       player_in_air_flag = v2;
       player_sliding_on_ground = 0;
     }
+  } else if (!g_double_jump_used && ((io_controller_press2 | io_controller_press1) & 0x80) != 0) {
+    g_double_jump_used = true;
+    uint8 v0 = player_xspeed;
+    if ((player_xspeed & 0x80) != 0)
+      v0 = -player_xspeed;
+    player_yspeed = kHandlePlayerPhysics_JumpHeightTable[(v0 >> 2) & 0xFE];
+    player_in_air_flag = 11;
+    player_sliding_on_ground = 0;
+    player_spin_jump_flag = 0;
+    io_sound_ch2 = 1;
   }
 LABEL_25:
   if ((player_sliding_on_ground & 0x80) != 0) {
