@@ -2290,6 +2290,7 @@ void GameMode14_InLevel() {  // 00a1da
       UpdateCurrentPlayerPositionRAM();
       GameMode14_InLevel_00C47E();
       ProcessNormalSprites();
+      NewtonianGravity_Update();
       GameMode14_InLevel_Bank02();
       mirror_current_layer1_ypos = v2;
       CompressOamEntExt();

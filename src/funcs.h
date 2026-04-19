@@ -2137,5 +2137,6 @@ typedef struct LmFeatures {
 #define HAS_HACK(i) ((LM_FEATURES->hacks & (i)) != 0)
 
 void HackHandleWalljump();
+void NewtonianGravity_Update(void);
 
 #endif  // SMW_FUNCS_H_
