@@ -178,6 +178,7 @@
     <ClCompile Include="smw_0c.c" />
     <ClCompile Include="smw_0d.c" />
     <ClCompile Include="smw_cpu_infra.c" />
+    <ClCompile Include="smw_rpg.c" />
     <ClCompile Include="smw_rtl.c" />
     <ClCompile Include="snes\apu.c">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Disabled</Optimization>

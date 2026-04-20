@@ -3,6 +3,7 @@
 #include "smw_rtl.h"
 #include "variables.h"
 #include "assets/smw_assets.h"
+#include "smw_rpg.h"
 
 static bool g_double_jump_used;
 
@@ -825,6 +826,15 @@ void UpdateStatusBarCounters() {  // 008e1a
       v16 = 46;
     misc_status_bar_tilemap[kk + 6] = v16;
     --r0;
+  }
+  // RPG stats: level at tilemap[31..32], HP at tilemap[40..41].
+  {
+    PairU16 lvl = HexToDec(g_player_level);
+    misc_status_bar_tilemap[31] = lvl.second ? (uint8)lvl.second : (uint8)0xfc;
+    misc_status_bar_tilemap[32] = (uint8)lvl.first;
+    PairU16 hp = HexToDec(g_player_hp);
+    misc_status_bar_tilemap[40] = hp.second ? (uint8)hp.second : (uint8)0xfc;
+    misc_status_bar_tilemap[41] = (uint8)hp.first;
   }
 }
 
@@ -2407,6 +2417,11 @@ void UploadOverworldLayer1And2Tilemaps(uint8 j) {  // 00a529
 }
 
 void GameMode12_PrepareLevel() {  // 00a59c
+  // RPG system: initialize on first load, restore HP on every level entry.
+  if (g_player_level == 0)
+    RpgInit();
+  else
+    RpgRestoreHp();
   ClearLayer3Tilemap();
   DamagePlayer_DisableButtons();
   flag_upload_load_screen_letters_tovram = 0;
@@ -6169,21 +6184,21 @@ void DamagePlayer_Hurt() {  // 00f5b7
     counter_pink_berry_cloud_coins = 0;
     if (player_wall_walk_status)
       RunPlayerBlockCode_00EB48(player_wall_walk_status & 1);
-    if (player_current_power_up) {
-      if (player_current_power_up == 2 && player_cape_flying_phase) {
-        io_sound_ch1 = 15;
-        player_spin_jump_flag = 1;
-        timer_player_hurt = 48;
-        DamagePlayer_00F622();
-      } else {
-        io_sound_ch1 = 4;
-        DropReservedItem();
-        player_current_state = 1;
-        player_current_power_up = 0;
-        DamagePlayer_SetHurtAnimationTimer(0x2F);
-      }
-    } else {
+    // Cape-flight special case: spin-jump bounce instead of taking damage.
+    if (player_current_power_up == 2 && player_cape_flying_phase) {
+      io_sound_ch1 = 15;
+      player_spin_jump_flag = 1;
+      timer_player_hurt = 48;
+      DamagePlayer_00F622();
+      return;
+    }
+    // RPG HP system: deduct HP and use defense-scaled invincibility.
+    uint8 hurt_dur = RpgTakeDamage();
+    if (g_player_hp == 0) {
       DamagePlayer_Kill();
+    } else {
+      io_sound_ch1 = 4;
+      DamagePlayer_SetHurtAnimationTimer(hurt_dur);
     }
   }
 }

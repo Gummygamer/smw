@@ -97,6 +97,9 @@
     <ClCompile Include="smw_cpu_infra.c">
       <Filter>Smw</Filter>
     </ClCompile>
+    <ClCompile Include="smw_rpg.c">
+      <Filter>Smw</Filter>
+    </ClCompile>
     <ClCompile Include="smw_rtl.c">
       <Filter>Smw</Filter>
     </ClCompile>

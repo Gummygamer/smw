@@ -2,6 +2,7 @@
 #include "funcs.h"
 #include "smw_rtl.h"
 #include "variables.h"
+#include "smw_rpg.h"
 
 void (*kProcessMinorExtendedSprites_MinorExtendedSpritesPtrs[12])(uint8 k) = {
     &ProcessMinorExtendedSprites_Return, &MExtSpr01_BrickPiece,  &MExtSpr02_SmallStar,   &MExtSpr03_EggShell,
@@ -3302,6 +3303,7 @@ void GivePoints_Entry2(uint8 j, uint8 a) {  // 02ace1
 }
 
 void GivePoints(uint8 k, uint8 a) {  // 02ace5
+  RpgAwardXp(spr_spriteid[k]);
   GivePoints_02ACEF(k, a + 5);
 }
 
