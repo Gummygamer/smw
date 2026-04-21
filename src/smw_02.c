@@ -1734,6 +1734,11 @@ LABEL_11:
     spr_decrementing_table1558[k] = 0;
     if (r14 != 53)
       SpawnContactEffectFromSide(k);
+    if (!RpgHitEnemy(k)) {
+      // Enemy survived the hit — bounce it without killing.
+      spr_decrementing_table154c[k] = 8;
+      return;
+    }
     GivePoints(k, 0);
     spr_current_status[k] = 2;
     if (spr_spriteid[k] == 30)

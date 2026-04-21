@@ -1,5 +1,7 @@
 #include "smw_rpg.h"
 #include "types.h"
+#include "common_rtl.h"
+#include "variables.h"
 
 uint8  g_player_level   = 0;
 uint16 g_player_xp      = 0;
@@ -162,4 +164,68 @@ uint8 RpgTakeDamage(void) {
     // Invincibility duration: base 0x2F frames, +4 frames per defense point.
     uint16 dur = 0x2Fu + (uint16)g_player_defense * 4u;
     return (dur > 0xFF) ? 0xFF : (uint8)dur;
+}
+
+// Base HP for each sprite, independent of world scaling.
+static uint8 SpriteBaseHp(uint8 id) {
+    switch (id) {
+    // Bosses — high base HP
+    case 0x87: return 8;   // Bowser
+    case 0x29: case 0x89: case 0x8A: case 0x8B:
+    case 0x8C: case 0x8D: case 0x8E: case 0x8F: return 5;  // Koopa Kids
+    case 0x88: return 4;   // Reznor
+    case 0x86: return 3;   // Wiggler head
+    // Mini-bosses / tough enemies
+    case 0x57: return 3;   // Sledge Bro
+    case 0x25: return 3;   // Big Boo
+    case 0x26: return 2;   // Thwomp
+    case 0x5C: return 2;   // Sumo Bro
+    case 0x1E: return 2;   // Lakitu
+    case 0x1F: case 0x20: return 2;  // Magikoopa
+    // Standard enemies — 1 HP (die in one hit, matches classic SMW)
+    default:   return (SpriteBaseXp(id) > 0) ? 1 : 0;
+    }
+}
+
+// Derive world bracket (0–7) from ow_level_number_lo.
+// Used to scale enemy HP for later worlds.
+static uint8 CurrentWorldBracket(void) {
+    uint8 lvl = ow_level_number_lo;
+    if (lvl < 5)  return 0;   // World 1
+    if (lvl < 12) return 1;   // World 2
+    if (lvl < 20) return 2;   // World 3
+    if (lvl < 28) return 3;   // World 4
+    if (lvl < 38) return 4;   // World 5
+    if (lvl < 45) return 5;   // World 6
+    if (lvl < 52) return 6;   // World 7
+    return 7;                  // Special / Star world
+}
+
+void RpgInitSpriteHp(uint8 k) {
+    uint8 base = SpriteBaseHp(spr_spriteid[k]);
+    if (base == 0) {
+        spr_table1504[k] = 0;
+        return;
+    }
+    uint8 world = CurrentWorldBracket();
+    // Bosses scale more aggressively: +1 HP per world bracket past W1.
+    // Regular enemies get +1 HP every 2 world brackets (worlds 3, 5, 7).
+    uint8 hp;
+    uint8 id = spr_spriteid[k];
+    uint8 is_boss = (id == 0x87 || id == 0x88 ||
+                     (id >= 0x29 && id <= 0x29) ||
+                     (id >= 0x89 && id <= 0x8F) ||
+                     id == 0x86);
+    if (is_boss) {
+        hp = base + world;
+    } else {
+        hp = base + (world / 2);
+    }
+    spr_table1504[k] = (hp > 99) ? 99 : hp;
+}
+
+uint8 RpgHitEnemy(uint8 k) {
+    if (spr_table1504[k] == 0) return 1;  // non-enemy, treat as instant kill
+    if (spr_table1504[k] > 0) --spr_table1504[k];
+    return spr_table1504[k] == 0;
 }

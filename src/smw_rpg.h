@@ -22,3 +22,11 @@ uint8 RpgAwardXp(uint8 sprite_id);
 // Apply one hit of damage to the player.
 // Returns the invincibility duration to use for the hurt timer.
 uint8 RpgTakeDamage(void);
+
+// Initialize per-sprite HP in spr_table1504[k] based on sprite type and world.
+// Call when a sprite slot is initialized (status 1 → 8).
+void RpgInitSpriteHp(uint8 k);
+
+// Apply one hit to the sprite in slot k.
+// Returns 1 if the enemy's HP reached 0 (should die), 0 if still alive.
+uint8 RpgHitEnemy(uint8 k);

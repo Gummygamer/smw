@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "assets/smw_assets.h"
 #include "smw_rpg.h"
+#include "smw_softbody.h"
 
 static bool g_double_jump_used;
 
@@ -2422,6 +2423,9 @@ void GameMode12_PrepareLevel() {  // 00a59c
     RpgInit();
   else
     RpgRestoreHp();
+  // Soft-body state holds snapshots of VRAM tile bytes from a prior level;
+  // clear it so stale snapshots never get written back over fresh tiles.
+  SoftBodyResetAll();
   ClearLayer3Tilemap();
   DamagePlayer_DisableButtons();
   flag_upload_load_screen_letters_tovram = 0;

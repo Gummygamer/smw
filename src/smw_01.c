@@ -3,6 +3,8 @@
 #include "smw_rtl.h"
 #include "variables.h"
 #include "assets/smw_assets.h"
+#include "smw_rpg.h"
+#include "smw_softbody.h"
 
 void (*kUnk_18137[13])(uint8) = {
     &SprStatus00_EmptySlot,   &SprStatus01_Init,         &SprStatus02_Dead,
@@ -790,6 +792,7 @@ void ProcessNormalSprites() {  // 01808c
     player_riding_yoshi_flag = 0;
     player_relative_yposition_during_screen_shake = 0;
   }
+  SoftBodyPollAllSlots();
 }
 
 uint8 CheckIfNormalSpriteOffScreen(uint8 k) {  // 0180cb
@@ -850,6 +853,7 @@ void SprStatus0C_GoalPowerUp(uint8 k) {  // 018157
 }
 
 void SprStatus01_Init(uint8 k) {  // 018172
+  RpgInitSpriteHp(k);
   spr_current_status[k] = 8;
   kUnk_1817d[spr_spriteid[k]](k);
 }
@@ -2504,6 +2508,12 @@ void SprStatus02_Dead(uint8 k) {  // 019aa2
 }
 
 void SprStatus02_Dead_SetNorSprStatus04(uint8 k) {  // 019acb
+  if (!RpgHitEnemy(k)) {
+    // Enemy survived — stun instead of kill.
+    spr_decrementing_table1540[k] = 31;
+    spr_current_status[k] = 9;
+    return;
+  }
   spr_current_status[k] = 4;
   spr_decrementing_table1540[k] = 31;
 }
@@ -2747,6 +2757,7 @@ void GenericGFXRtDraw1Tile16x16_019F0F(uint8 k, uint8 r4) {  // 019f0f
 
 void SprStatus0B_Carried(uint8 k) {  // 019f71
   SprStatus0B_Carried_019F9B(k);
+
   if (player_turning_around_flag || yoshi_in_pipe || timer_display_player_face_screen_pose)
     spr_oamindex[k] = 0;
   uint8 v1 = sprites_tile_priority;
@@ -2754,6 +2765,14 @@ void SprStatus0B_Carried(uint8 k) {  // 019f71
     sprites_tile_priority = 16;
   ProcessStunnedNormalSprite(k);
   sprites_tile_priority = v1;
+
+  // After the normal draw has pushed the OAM entry, re-warp the sprite's
+  // actual VRAM tile pixels through a spring-mass lattice for per-pixel
+  // soft-body deformation.  Runs only while the sprite is in status 11
+  // (carried); the sprite-wide poll in ProcessNormalSprites restores the
+  // pristine tile bytes when the sprite transitions away.
+  if (spr_current_status[k] == 11)
+    SoftBodyOnCarriedFrame(k);
 }
 
 void SprStatus0B_Carried_019F9B(uint8 k) {  // 019f9b
@@ -3451,9 +3470,14 @@ LABEL_62:;
 //        printf("Unknown return value in carry!\n");
         return 0;
       }
-      spr_current_status[k] = 2;
-      spr_xspeed[k] = spr_yspeed[k] = 0;
-      goto LABEL_62;
+      if (RpgHitEnemy(k)) {
+        spr_current_status[k] = 2;
+        spr_xspeed[k] = spr_yspeed[k] = 0;
+        goto LABEL_62;
+      }
+      spr_decrementing_table1540[k] = 31;
+      spr_current_status[k] = 9;
+      return 0;
     }
     if (v7 < 0x72) {
       if (v7 == 110) {
