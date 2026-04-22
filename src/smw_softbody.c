@@ -9,13 +9,15 @@
 // source pixels into a canvas, and re-encode that canvas back into sprite
 // VRAM tiles.  Two rendering modes:
 //
-//   mode 1 (non-shell): 32x32 canvas centred on the original 16x16, drawn
+//   mode 1 (preferred): 32x32 canvas centred on the original 16x16, drawn
 //          via four 16x16 OAM entries pointing at scratch VRAM tiles — so
-//          deformation can spill far outside the original silhouette.
+//          deformation can spill far outside the original silhouette.  For
+//          shells, the two 8x8 face-decoration tiles at oam[64]/oam[65]
+//          are suppressed while carried (oam[65] is reused as a quadrant).
 //
-//   mode 2 (shell, or mode-1 fallback when the scratch pool is full):
-//          16x16 canvas, outer ring of control points edge-locked so the
-//          deformation stays inside the sprite's original tile footprint.
+//   mode 2 (fallback when the scratch pool is full): 16x16 canvas, outer
+//          ring of control points edge-locked so the deformation stays
+//          inside the sprite's original tile footprint.
 
 #define SB_N       5
 #define SB_CELLS   (SB_N - 1)
@@ -186,7 +188,7 @@ static void StepPhysics(SbSlot *s, int16 hand_dx, int16 hand_dy, int edge_lock) 
       int i = gy * SB_N + gx;
       int dist_from_anchor = (4 - gy);
       if (dist_from_anchor < 0) dist_from_anchor = 0;
-      ay[i] += (int16)(2 + dist_from_anchor);
+      ay[i] += (int16)(1 + dist_from_anchor / 2);
     }
 
   // 2. Anchor-to-rest spring (~k = 1/16): deformations decay back.
@@ -223,15 +225,15 @@ static void StepPhysics(SbSlot *s, int16 hand_dx, int16 hand_dy, int edge_lock) 
       int i = gy * SB_N + gx;
       if (i == anchor) continue;
       int strength = (4 - gy) + 1;
-      s->vx[i] -= (int16)(hand_dx * SB_FP * strength / 4);
-      s->vy[i] -= (int16)(hand_dy * SB_FP * strength / 4);
+      s->vx[i] -= (int16)(hand_dx * SB_FP * strength / 8);
+      s->vy[i] -= (int16)(hand_dy * SB_FP * strength / 8);
     }
   }
 
   // 5. Integrate with damping.  Clamp offsets — edge-lock mode keeps them
   //    tight so warped pixels never leave the 16x16 footprint; expanded
   //    mode lets them fill most of the 32x32 canvas.
-  int16 lim = edge_lock ? (int16)(3 * SB_FP) : (int16)(14 * SB_FP);
+  int16 lim = edge_lock ? (int16)(3 * SB_FP) : (int16)(10 * SB_FP);
   for (int i = 0; i < SB_N * SB_N; ++i) {
     s->vx[i] += ax[i];
     s->vy[i] += ay[i];
@@ -447,20 +449,21 @@ void SoftBodyOnCarriedFrame(uint8 k) {
   uint8 bank = oam[ent_off].flags & 1;
 
   SbSlot *s = &g_sb[k];
-  uint8 desired_mode = is_shell ? 2 : 1;
 
-  // Rebind if anything about the identity changed.
-  if (s->mode != desired_mode || s->oamindex != idx) {
+  // Rebind if the OAM slot changed (different carried sprite on this k) or
+  // we have no active mesh.  Once active we keep whatever mode we got from
+  // ActivateExpanded (it may have fallen back to mode 2 when pools are
+  // full) — re-deciding every frame would just thrash the VRAM snapshots.
+  if (!s->mode || s->oamindex != idx) {
     if (s->mode) SoftBodyDeactivate(k);
-    if (is_shell) ActivateEdgeLock(k, ch, bank, idx);
-    else          ActivateExpanded(k, ch, bank, idx);
+    ActivateExpanded(k, ch, bank, idx);
   } else if (s->mode == 2) {
-    // Animation frame change: our snapshot is stale.
+    // Mode 2's snapshot must track the current animation tile.
     uint16 cur_addrs[4];
     ComputeQuadTileAddrs(ch, bank, cur_addrs);
     if (cur_addrs[0] != s->orig_tile_vaddr[0]) {
       SoftBodyDeactivate(k);
-      ActivateEdgeLock(k, ch, bank, idx);
+      ActivateExpanded(k, ch, bank, idx);
     }
   }
   if (!s->mode) return;   // activation couldn't happen (shouldn't occur)
@@ -499,25 +502,32 @@ void SoftBodyOnCarriedFrame(uint8 k) {
     return;
   }
 
-  // mode == 1: expand to 32x32.  Snapshot the original OAM entry's pose
-  // before hiding it, then lay down four quadrants around the anchor.
-  uint8 x0 = oam[64].xpos;
-  uint8 y0 = oam[64].ypos;
-  uint8 flags0 = oam[64].flags;
+  // mode == 1: expand to 32x32.  Snapshot the body OAM entry's pose before
+  // anything is overwritten, then lay down four quadrants around it.
+  uint8 x0 = oam[ent_off].xpos;
+  uint8 y0 = oam[ent_off].ypos;
+  uint8 flags0 = oam[ent_off].flags;
 
   uint8 canvas[SB_CANVAS * SB_CANVAS];
   WarpImage(s, canvas, SB_CANVAS, SB_CANVAS_MARGIN);
   EncodeCanvas32(canvas, s->scratch_vaddr);
 
-  // Hide the original 16x16 entry — its tiles are untouched and would
-  // otherwise double-render on top of our expanded canvas.
+  // Hide oam[64].  For non-shells that was the 16x16 body itself; for
+  // shells it's the first 8x8 face-decoration tile.  Either way we don't
+  // want it drawing on top of our expanded canvas.  Shells also have a
+  // second face tile at oam[65] and their body at oam[66] — both of those
+  // get overwritten by our quadrants below, so no extra hiding needed.
   oam[64].ypos = 0xF0;
   sprites_oamtile_size_buffer[slot + 64] = 0;
 
-  // Our scratch tiles live in bank 2, so force flags.bank = 1.  Flip bits
-  // are preserved on each quadrant but quadrant POSITION isn't flipped;
-  // this mirrors how a single 16x16 OAM entry handles its tile layout.
-  uint8 quad_flags = (flags0 & ~1) | 1;
+  // Scratch tiles live in bank 2 → force flags.bank = 1.  Also strip the
+  // H/V flip bits (0x40/0x80): if we left them set, each quadrant's own
+  // 2 tiles would mirror internally but the four quadrant POSITIONS would
+  // not swap, producing visible seams where the quadrants meet.  Our
+  // encoded canvas is built unflipped; rendering the quadrants unflipped
+  // keeps it continuous.  Shells are horizontally symmetric enough that
+  // losing the facing flip reads as natural.
+  uint8 quad_flags = (flags0 & 0x3E) | 1;
   uint8 highx = spr_xoffscreen_flag[k] & 1;
   for (int q = 0; q < 4; ++q) {
     int qx = (q & 1) ? 8 : -8;
